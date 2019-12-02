@@ -74,6 +74,11 @@
 *       Allow scale all the drawn content to match the high-DPI equivalent size (only PLATFORM_DESKTOP)
 *       NOTE: This flag is forced on macOS, since most displays are high-DPI
 *
+*   #define SUPPORT_COMPRESSION_API
+*       Support CompressData() and DecompressData() functions, those functions use zlib implementation
+*       provided by stb_image and stb_image_write libraries, so, those libraries must be enabled on textures module
+*       for linkage
+*
 *   DEPENDENCIES:
 *       rglfw    - Manage graphic device, OpenGL context and inputs on PLATFORM_DESKTOP (Windows, Linux, OSX. FreeBSD, OpenBSD, NetBSD, DragonFly)
 *       raymath  - 3D math functionality (Vector2, Vector3, Matrix, Quaternion)
@@ -252,6 +257,12 @@
     #include <emscripten/html5.h>       // Emscripten HTML5 library
 #endif
 
+#if defined(SUPPORT_COMPRESSION_API)
+    // NOTE: Those declarations require stb_image and stb_image_write definitions, included in textures module
+    unsigned char *stbi_zlib_compress(unsigned char *data, int data_len, int *out_len, int quality);
+    char *stbi_zlib_decode_malloc(char const *buffer, int len, int *outlen);
+#endif
+
 //----------------------------------------------------------------------------------
 // Defines and Macros
 //----------------------------------------------------------------------------------
@@ -274,6 +285,8 @@
 #define MAX_GAMEPADS              4         // Max number of gamepads supported
 #define MAX_GAMEPAD_BUTTONS       32        // Max bumber of buttons supported (per gamepad)
 #define MAX_GAMEPAD_AXIS          8         // Max number of axis supported (per gamepad)
+
+#define MAX_CHARS_QUEUE           16        // Max number of characters in the input queue
 
 #define STORAGE_FILENAME        "storage.data"
 
@@ -300,6 +313,7 @@ static unsigned int displayWidth, displayHeight;// Display width and height (mon
 static int screenWidth, screenHeight;           // Screen width and height (used render area)
 static int renderWidth, renderHeight;           // Framebuffer width and height (render area, including black bars if required)
 static int currentWidth, currentHeight;         // Current render width and height, it could change on BeginTextureMode()
+static int windowPositionX, windowPositionY;    // Window position on screen (required on fullscreen toggle)
 static int renderOffsetX = 0;                   // Offset X from render area (must be divided by 2)
 static int renderOffsetY = 0;                   // Offset Y from render area (must be divided by 2)
 static bool fullscreen = false;                 // Fullscreen mode (useful only for PLATFORM_DESKTOP)
@@ -339,8 +353,10 @@ static bool contextRebindRequired = false;      // Used to know context rebind r
 // Keyboard states
 static char previousKeyState[512] = { 0 };      // Registers previous frame key state
 static char currentKeyState[512] = { 0 };       // Registers current frame key state
-static int lastKeyPressed = -1;                 // Register last key pressed
 static int exitKey = KEY_ESCAPE;                // Default exit key (ESC)
+
+static unsigned int keyPressedQueue[MAX_CHARS_QUEUE] = { 0 }; // Input characters queue
+static int keyPressedQueueCount = 0;             // Input characters queue count
 
 #if defined(PLATFORM_RPI)
 // NOTE: For keyboard we will use the standard input (but reconfigured...)
@@ -568,7 +584,7 @@ static void InitTerminal(void)
     }
     else
     {
-        
+
         ioctl(STDIN_FILENO, KDSKBMODE, K_XLATE);
     }
 
@@ -579,7 +595,7 @@ static void InitTerminal(void)
 static void RestoreTerminal(void)
 {
     TraceLog(LOG_INFO, "Restore Terminal ...");
-    
+
     // Reset to default keyboard settings
     tcsetattr(STDIN_FILENO, TCSANOW, &defaultKeyboardSettings);
 
@@ -763,7 +779,7 @@ void CloseWindow(void)
             pthread_join(eventWorkers[i].threadId, NULL);
         }
     }
-    
+
     if (gamepadThreadId) pthread_join(gamepadThreadId, NULL);
 #endif
 
@@ -842,8 +858,27 @@ void ToggleFullscreen(void)
     fullscreen = !fullscreen;          // Toggle fullscreen flag
 
     // NOTE: glfwSetWindowMonitor() doesn't work properly (bugs)
-    if (fullscreen) glfwSetWindowMonitor(window, glfwGetPrimaryMonitor(), 0, 0, screenWidth, screenHeight, GLFW_DONT_CARE);
-    else glfwSetWindowMonitor(window, NULL, 0, 0, screenWidth, screenHeight, GLFW_DONT_CARE);
+    if (fullscreen) 
+    {
+        // Store previous window position (in case we exit fullscreen)
+        glfwGetWindowPos(window, &windowPositionX, &windowPositionY);
+
+        GLFWmonitor *monitor = glfwGetPrimaryMonitor();
+        if (!monitor)
+        {
+            TraceLog(LOG_WARNING, "Failed to get monitor");
+            glfwSetWindowMonitor(window, glfwGetPrimaryMonitor(), 0, 0, screenWidth, screenHeight, GLFW_DONT_CARE);
+            return;
+        }
+
+        const GLFWvidmode *mode = glfwGetVideoMode(monitor);
+        glfwSetWindowMonitor(window, glfwGetPrimaryMonitor(), 0, 0, screenWidth, screenHeight, mode->refreshRate);
+        
+        // Try to enable GPU V-Sync, so frames are limited to screen refresh rate (60Hz -> 60 FPS)
+        // NOTE: V-Sync can be enabled by graphic driver configuration
+        if (configFlags & FLAG_VSYNC_HINT) glfwSwapInterval(1);
+    }
+    else glfwSetWindowMonitor(window, NULL, windowPositionX, windowPositionY, screenWidth, screenHeight, GLFW_DONT_CARE);
 #endif
 
 #if defined(PLATFORM_ANDROID) || defined(PLATFORM_RPI)
@@ -1053,6 +1088,17 @@ int GetMonitorPhysicalHeight(int monitor)
     return 0;
 }
 
+// Get window position XY on monitor
+Vector2 GetWindowPosition(void)
+{
+    int x = 0;
+    int y = 0;
+#if defined(PLATFORM_DESKTOP)
+    glfwGetWindowPos(window, &x, &y);
+#endif
+    return (Vector2){ (float)x, (float)y };
+}
+
 // Get the human-readable, UTF-8 encoded name of the primary monitor
 const char *GetMonitorName(int monitor)
 {
@@ -1185,7 +1231,7 @@ void EndDrawing(void)
     // we draw a small rectangle for user reference
     DrawRectangle(mousePosition.x, mousePosition.y, 3, 3, MAROON);
 #endif
-    
+
     rlglDraw();                     // Draw Buffers (Only OpenGL 3+ and ES2)
 
 #if defined(SUPPORT_GIF_RECORDING)
@@ -1248,10 +1294,10 @@ void BeginMode2D(Camera2D camera)
     rlglDraw();                         // Draw Buffers (Only OpenGL 3+ and ES2)
 
     rlLoadIdentity();                   // Reset current matrix (MODELVIEW)
-    
+
     // Apply screen scaling if required
     rlMultMatrixf(MatrixToFloat(screenScaling));
-    
+
     // Apply 2d camera transformation to modelview
     rlMultMatrixf(MatrixToFloat(GetCameraMatrix2D(camera)));
 }
@@ -1443,7 +1489,7 @@ Matrix GetCameraMatrix(Camera camera)
 }
 
 // Returns camera 2d transform matrix
-Matrix GetCameraMatrix2D(Camera2D camera) 
+Matrix GetCameraMatrix2D(Camera2D camera)
 {
     Matrix matTransform = { 0 };
     // The camera in world-space is set by
@@ -1464,9 +1510,9 @@ Matrix GetCameraMatrix2D(Camera2D camera)
     Matrix matRotation = MatrixRotate((Vector3){ 0.0f, 0.0f, 1.0f }, camera.rotation*DEG2RAD);
     Matrix matScale = MatrixScale(camera.zoom, camera.zoom, 1.0f);
     Matrix matTranslation = MatrixTranslate(camera.offset.x, camera.offset.y, 0.0f);
-    
+
     matTransform = MatrixMultiply(MatrixMultiply(matOrigin, MatrixMultiply(matScale, matRotation)), matTranslation);
-    
+
     return matTransform;
 }
 
@@ -1513,20 +1559,20 @@ Vector2 GetWorldToScreen(Vector3 position, Camera camera)
 }
 
 // Returns the screen space position for a 2d camera world space position
-Vector2 GetWorldToScreen2D(Vector2 position, Camera2D camera) 
+Vector2 GetWorldToScreen2D(Vector2 position, Camera2D camera)
 {
     Matrix matCamera = GetCameraMatrix2D(camera);
     Vector3 transform = Vector3Transform((Vector3){ position.x, position.y, 0 }, matCamera);
-    
+
     return (Vector2){ transform.x, transform.y };
 }
 
 // Returns the world space position for a 2d camera screen space position
-Vector2 GetScreenToWorld2D(Vector2 position, Camera2D camera) 
+Vector2 GetScreenToWorld2D(Vector2 position, Camera2D camera)
 {
     Matrix invMatCamera = MatrixInvert(GetCameraMatrix2D(camera));
     Vector3 transform = Vector3Transform((Vector3){ position.x, position.y, 0 }, invMatCamera);
-    
+
     return (Vector2){ transform.x, transform.y };
 }
 
@@ -1590,6 +1636,19 @@ Vector4 ColorNormalize(Color color)
     result.y = (float)color.g/255.0f;
     result.z = (float)color.b/255.0f;
     result.w = (float)color.a/255.0f;
+
+    return result;
+}
+
+// Returns color from normalized values [0..1]
+Color ColorFromNormalized(Vector4 normalized)
+{
+    Color result;
+
+    result.r = normalized.x*255.0f;
+    result.g = normalized.y*255.0f;
+    result.b = normalized.z*255.0f;
+    result.a = normalized.w*255.0f;
 
     return result;
 }
@@ -1774,29 +1833,21 @@ bool FileExists(const char *fileName)
 bool IsFileExtension(const char *fileName, const char *ext)
 {
     bool result = false;
-    const char *fileExt;
+    const char *fileExt = GetExtension(fileName);
 
-    if ((fileExt = strrchr(fileName, '.')) != NULL)
+    if (fileExt != NULL)
     {
-#if defined(_WIN32)
-        result = true;
-        int extLen = strlen(ext);
+        int extCount = 0;
+        const char **checkExts = TextSplit(ext, ';', &extCount);
 
-        if (strlen(fileExt) == extLen)
+        for (int i = 0; i < extCount; i++)
         {
-            for (int i = 0; i < extLen; i++)
+            if (strcmp(fileExt, checkExts[i] + 1) == 0)
             {
-                if (tolower(fileExt[i]) != tolower(ext[i]))
-                {
-                    result = false;
-                    break;
-                }
+                result = true;
+                break;
             }
         }
-        else result = false;
-#else
-        if (strcmp(fileExt, ext) == 0) result = true;
-#endif
     }
 
     return result;
@@ -1838,9 +1889,10 @@ static const char *strprbrk(const char *s, const char *charset)
 // Get pointer to filename for a path string
 const char *GetFileName(const char *filePath)
 {
-    const char *fileName = strprbrk(filePath, "\\/");
+    const char *fileName = NULL;
+    if (filePath != NULL) fileName = strprbrk(filePath, "\\/");
 
-    if (!fileName || fileName == filePath) return filePath;
+    if (!fileName || (fileName == filePath)) return filePath;
 
     return fileName + 1;
 }
@@ -1853,7 +1905,7 @@ const char *GetFileNameWithoutExt(const char *filePath)
     static char fileName[MAX_FILENAMEWITHOUTEXT_LENGTH];
     memset(fileName, 0, MAX_FILENAMEWITHOUTEXT_LENGTH);
 
-    strcpy(fileName, GetFileName(filePath));   // Get filename with extension
+    if (filePath != NULL) strcpy(fileName, GetFileName(filePath));   // Get filename with extension
 
     int len = strlen(fileName);
 
@@ -1893,9 +1945,9 @@ const char *GetPrevDirectoryPath(const char *dirPath)
     static char prevDirPath[MAX_FILEPATH_LENGTH];
     memset(prevDirPath, 0, MAX_FILEPATH_LENGTH);
     int pathLen = strlen(dirPath);
-    
+
     if (pathLen <= 3) strcpy(prevDirPath, dirPath);
-    
+
     for (int i = (pathLen - 1); (i > 0) && (pathLen > 3); i--)
     {
         if ((dirPath[i] == '\\') || (dirPath[i] == '/'))
@@ -1905,7 +1957,7 @@ const char *GetPrevDirectoryPath(const char *dirPath)
             break;
         }
     }
-    
+
     return prevDirPath;
 }
 
@@ -1963,11 +2015,12 @@ void ClearDirectoryFiles(void)
 {
     if (dirFilesCount > 0)
     {
-        for (int i = 0; i < dirFilesCount; i++) RL_FREE(dirFilesPath[i]);
+        for (int i = 0; i < MAX_DIRECTORY_FILES; i++) RL_FREE(dirFilesPath[i]);
 
         RL_FREE(dirFilesPath);
-        dirFilesCount = 0;
     }
+    
+    dirFilesCount = 0;
 }
 
 // Change working directory, returns true if success
@@ -2016,6 +2069,32 @@ long GetFileModTime(const char *fileName)
     }
 
     return 0;
+}
+
+// Compress data (DEFLATE algorythm)
+unsigned char *CompressData(unsigned char *data, int dataLength, int *compDataLength)
+{
+    #define COMPRESSION_QUALITY_DEFLATE  8
+
+    unsigned char *compData = NULL;
+
+#if defined(SUPPORT_COMPRESSION_API)
+    compData = stbi_zlib_compress(data, dataLength, compDataLength, COMPRESSION_QUALITY_DEFLATE);
+#endif
+
+    return compData;
+}
+
+// Decompress data (DEFLATE algorythm)
+unsigned char *DecompressData(unsigned char *compData, int compDataLength, int *dataLength)
+{
+    char *data = NULL;
+
+#if defined(SUPPORT_COMPRESSION_API)
+    data = stbi_zlib_decode_malloc((char *)compData, compDataLength, dataLength);
+#endif
+
+    return (unsigned char *)data;
 }
 
 // Save integer value to storage file (to defined position)
@@ -2168,7 +2247,22 @@ bool IsKeyUp(int key)
 // Get the last key pressed
 int GetKeyPressed(void)
 {
-    return lastKeyPressed;
+    int value = 0;
+
+    if (keyPressedQueueCount > 0)
+    {
+        // Get character from the queue head
+        value = keyPressedQueue[0];
+
+        // Shift elements 1 step toward the head.
+        for (int i = 0; i < (keyPressedQueueCount - 1); i++) keyPressedQueue[i] = keyPressedQueue[i + 1];
+
+        // Reset last character in the queue
+        keyPressedQueue[keyPressedQueueCount] = 0;
+        keyPressedQueueCount--;
+    }
+
+    return value;
 }
 
 // Set a custom key to exit program
@@ -2615,14 +2709,21 @@ static bool InitGraphicsDevice(int width, int height)
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
         glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
 #if defined(PLATFORM_DESKTOP)
-        glfwWindowHint(GLFW_CONTEXT_CREATION_API, GLFW_EGL_CONTEXT_API);   
+        glfwWindowHint(GLFW_CONTEXT_CREATION_API, GLFW_EGL_CONTEXT_API);
 #else
-        glfwWindowHint(GLFW_CONTEXT_CREATION_API, GLFW_NATIVE_CONTEXT_API); 
+        glfwWindowHint(GLFW_CONTEXT_CREATION_API, GLFW_NATIVE_CONTEXT_API);
 #endif
     }
 
     if (fullscreen)
     {
+        // remember center for switchinging from fullscreen to window
+        windowPositionX = displayWidth/2 - screenWidth/2;
+        windowPositionY = displayHeight/2 - screenHeight/2;
+
+        if (windowPositionX < 0) windowPositionX = 0;
+        if (windowPositionY < 0) windowPositionY = 0;
+
         // Obtain recommended displayWidth/displayHeight from a valid videomode for the monitor
         int count = 0;
         const GLFWvidmode *modes = glfwGetVideoModes(glfwGetPrimaryMonitor(), &count);
@@ -2711,10 +2812,8 @@ static bool InitGraphicsDevice(int width, int height)
 
     glfwMakeContextCurrent(window);
 
-    // Try to disable GPU V-Sync by default, set framerate using SetTargetFPS()
-    // NOTE: V-Sync can be enabled by graphic driver configuration
 #if !defined(PLATFORM_WEB)
-    glfwSwapInterval(0);
+    glfwSwapInterval(0);        // No V-Sync by default
 #endif
 
 #if defined(PLATFORM_DESKTOP)
@@ -3210,8 +3309,8 @@ static void InitTimer(void)
 // Wait for some milliseconds (stop program execution)
 // NOTE: Sleep() granularity could be around 10 ms, it means, Sleep() could
 // take longer than expected... for that reason we use the busy wait loop
-// http://stackoverflow.com/questions/43057578/c-programming-win32-games-sleep-taking-longer-than-expected
-// http://www.geisswerks.com/ryan/FAQS/timing.html --> All about timming on Win32!
+// Ref: http://stackoverflow.com/questions/43057578/c-programming-win32-games-sleep-taking-longer-than-expected
+// Ref: http://www.geisswerks.com/ryan/FAQS/timing.html --> All about timming on Win32!
 static void Wait(float ms)
 {
 #if defined(SUPPORT_BUSY_WAIT_LOOP) && !defined(PLATFORM_UWP)
@@ -3370,8 +3469,8 @@ static void PollInputEvents(void)
     UpdateGestures();
 #endif
 
-    // Reset last key pressed registered
-    lastKeyPressed = -1;
+    // Reset key pressed registered
+    keyPressedQueueCount = 0;
 
 #if !defined(PLATFORM_RPI)
     // Reset last gamepad button/axis registered state
@@ -3380,14 +3479,15 @@ static void PollInputEvents(void)
 #endif
 
 #if defined(PLATFORM_RPI)
-
     // Register previous keys states
     for (int i = 0; i < 512; i++)previousKeyState[i] = currentKeyState[i];
 
     // Grab a keypress from the evdev fifo if avalable
     if (lastKeyPressedEvdev.Head != lastKeyPressedEvdev.Tail)
     {
-        lastKeyPressed = lastKeyPressedEvdev.Contents[lastKeyPressedEvdev.Tail];    // Read the key from the buffer
+        keyPressedQueue[keyPressedQueueCount] = lastKeyPressedEvdev.Contents[lastKeyPressedEvdev.Tail];    // Read the key from the buffer
+        keyPressedQueueCount++;
+        
         lastKeyPressedEvdev.Tail = (lastKeyPressedEvdev.Tail + 1) & 0x07;           // Increment the tail pointer forwards and binary wraparound after 7 (fifo is 8 elements long)
     }
 
@@ -3797,13 +3897,7 @@ static void KeyCallback(GLFWwindow *window, int key, int scancode, int action, i
         }
 #endif  // SUPPORT_SCREEN_CAPTURE
     }
-    else
-    {
-        currentKeyState[key] = action;
-
-        // NOTE: lastKeyPressed already registered on CharCallback()
-        //if (action == GLFW_PRESS) lastKeyPressed = key;
-    }
+    else currentKeyState[key] = action;
 }
 
 // GLFW3 Mouse Button Callback, runs on mouse button pressed
@@ -3873,10 +3967,16 @@ static void CharCallback(GLFWwindow *window, unsigned int key)
 {
     // NOTE: Registers any key down considering OS keyboard layout but
     // do not detects action events, those should be managed by user...
-    // https://github.com/glfw/glfw/issues/668#issuecomment-166794907
-    // http://www.glfw.org/docs/latest/input_guide.html#input_char
+    // Ref: https://github.com/glfw/glfw/issues/668#issuecomment-166794907
+    // Ref: https://www.glfw.org/docs/latest/input_guide.html#input_char
 
-    lastKeyPressed = key;
+    // Check if there is space available in the queue
+    if (keyPressedQueueCount < MAX_CHARS_QUEUE)
+    {
+        // Add character to the queue
+        keyPressedQueue[keyPressedQueueCount] = key;
+        keyPressedQueueCount++;
+    }
 }
 
 // GLFW3 CursorEnter Callback, when cursor enters the window
@@ -3911,7 +4011,7 @@ static void WindowIconifyCallback(GLFWwindow *window, int iconified)
 }
 
 // GLFW3 Window Drop Callback, runs when drop files into window
-// NOTE: Paths are stored in dinamic memory for further retrieval
+// NOTE: Paths are stored in dynamic memory for further retrieval
 // Everytime new files are dropped, old ones are discarded
 static void WindowDropCallback(GLFWwindow *window, int count, const char **paths)
 {
@@ -4081,7 +4181,9 @@ static int32_t AndroidInputCallback(struct android_app *app, AInputEvent *event)
         if (AKeyEvent_getAction(event) == AKEY_EVENT_ACTION_DOWN)
         {
             currentKeyState[keycode] = 1;  // Key down
-            lastKeyPressed = keycode;
+            
+            keyPressedQueue[keyPressedQueueCount] = keycode;
+            keyPressedQueueCount++;
         }
         else currentKeyState[keycode] = 0;  // Key up
 
@@ -4096,7 +4198,9 @@ static int32_t AndroidInputCallback(struct android_app *app, AInputEvent *event)
         if (AKeyEvent_getAction(event) == AKEY_EVENT_ACTION_DOWN)
         {
             currentKeyState[keycode] = 1;   // Key down
-            lastKeyPressed = keycode;
+            
+            keyPressedQueue[keyPressedQueueCount] = keycode;
+            keyPressedQueueCount++;
         }
         else currentKeyState[keycode] = 0;  // Key up
 
@@ -4458,8 +4562,20 @@ static void ProcessKeyboard(void)
                 }
             }
         }
-        else if (keysBuffer[i] == 0x0a) { lastKeyPressed = 257; currentKeyState[257] = 1; }    // raylib KEY_ENTER (don't mix with <linux/input.h> KEY_*)
-        else if (keysBuffer[i] == 0x7f) { lastKeyPressed = 259; currentKeyState[259] = 1; }    // raylib KEY_BACKSPACE
+        else if (keysBuffer[i] == 0x0a)     // raylib KEY_ENTER (don't mix with <linux/input.h> KEY_*)
+        {
+            currentKeyState[257] = 1; 
+            
+            keyPressedQueue[keyPressedQueueCount] = 257;     // Add keys pressed into queue
+            keyPressedQueueCount++;
+        }
+        else if (keysBuffer[i] == 0x7f)     // raylib KEY_BACKSPACE
+        { 
+            currentKeyState[259] = 1; 
+            
+            keyPressedQueue[keyPressedQueueCount] = 257;     // Add keys pressed into queue
+            keyPressedQueueCount++;
+        }
         else
         {
             TraceLog(LOG_DEBUG, "Pressed key (ASCII): 0x%02x", keysBuffer[i]);
@@ -4471,7 +4587,8 @@ static void ProcessKeyboard(void)
             }
             else currentKeyState[(int)keysBuffer[i]] = 1;
 
-            lastKeyPressed = keysBuffer[i];     // Register last key pressed
+            keyPressedQueue[keyPressedQueueCount] = keysBuffer[i];     // Add keys pressed into queue
+            keyPressedQueueCount++;
         }
     }
 
@@ -4882,9 +4999,13 @@ static void *EventThread(void *arg)
                             // TODO: This fifo is not fully threadsafe with multiple writers, so multiple keyboards hitting a key at the exact same time could miss a key (double write to head before it was incremented)
                         }
                         */
-                        
+
                         currentKeyState[keycode] = event.value;
-                        if (event.value == 1) lastKeyPressed = keycode;     // Register last key pressed
+                        if (event.value == 1) 
+                        {
+                            keyPressedQueue[keyPressedQueueCount] = keycode;     // Register last key pressed
+                            keyPressedQueueCount++;
+                        }
 
                         #if defined(SUPPORT_SCREEN_CAPTURE)
                             // Check screen capture key (raylib key: KEY_F12)
@@ -4896,7 +5017,7 @@ static void *EventThread(void *arg)
                         #endif
 
                         if (currentKeyState[exitKey] == 1) windowShouldClose = true;
-    
+
                         TraceLog(LOG_DEBUG, "KEY%s ScanCode: %4i KeyCode: %4i",event.value == 0 ? "UP":"DOWN", event.code, keycode);
                     }
                 }

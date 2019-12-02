@@ -110,6 +110,21 @@ void DrawLine3D(Vector3 startPos, Vector3 endPos, Color color)
     rlEnd();
 }
 
+// Draw a point in 3D space--actually a small line.
+void DrawPoint3D(Vector3 position, Color color)
+{
+    if (rlCheckBufferLimit(8)) rlglDraw();
+    
+    rlPushMatrix();
+        rlTranslatef(position.x, position.y, position.z);
+        rlBegin(RL_LINES);
+            rlColor4ub(color.r, color.g, color.b, color.a);
+            rlVertex3f(0.0,0.0,0.0);
+            rlVertex3f(0.0,0.0,0.1);
+        rlEnd();
+    rlPopMatrix();
+}
+
 // Draw a circle in 3D world space
 void DrawCircle3D(Vector3 center, float radius, Vector3 rotationAxis, float rotationAngle, Color color)
 {
@@ -296,7 +311,7 @@ void DrawCubeTexture(Texture2D texture, Vector3 position, float width, float hei
     float x = position.x;
     float y = position.y;
     float z = position.z;
-    
+
     if (rlCheckBufferLimit(36)) rlglDraw();
 
     rlEnableTexture(texture.id);
@@ -362,7 +377,7 @@ void DrawSphereEx(Vector3 centerPos, float radius, int rings, int slices, Color 
 {
     int numVertex = (rings + 2)*slices*6;
     if (rlCheckBufferLimit(numVertex)) rlglDraw();
-    
+
     rlPushMatrix();
         // NOTE: Transformation is applied in inverse order (scale -> translate)
         rlTranslatef(centerPos.x, centerPos.y, centerPos.z);
@@ -405,7 +420,7 @@ void DrawSphereWires(Vector3 centerPos, float radius, int rings, int slices, Col
 {
     int numVertex = (rings + 2)*slices*6;
     if (rlCheckBufferLimit(numVertex)) rlglDraw();
-    
+
     rlPushMatrix();
         // NOTE: Transformation is applied in inverse order (scale -> translate)
         rlTranslatef(centerPos.x, centerPos.y, centerPos.z);
@@ -449,7 +464,7 @@ void DrawSphereWires(Vector3 centerPos, float radius, int rings, int slices, Col
 void DrawCylinder(Vector3 position, float radiusTop, float radiusBottom, float height, int sides, Color color)
 {
     if (sides < 3) sides = 3;
-    
+
     int numVertex = sides*6;
     if (rlCheckBufferLimit(numVertex)) rlglDraw();
 
@@ -508,7 +523,7 @@ void DrawCylinder(Vector3 position, float radiusTop, float radiusBottom, float h
 void DrawCylinderWires(Vector3 position, float radiusTop, float radiusBottom, float height, int sides, Color color)
 {
     if (sides < 3) sides = 3;
-    
+
     int numVertex = sides*8;
     if (rlCheckBufferLimit(numVertex)) rlglDraw();
 
@@ -540,7 +555,7 @@ void DrawCylinderWires(Vector3 position, float radiusTop, float radiusBottom, fl
 void DrawPlane(Vector3 centerPos, Vector2 size, Color color)
 {
     if (rlCheckBufferLimit(4)) rlglDraw();
-    
+
     // NOTE: Plane is always created on XZ ground
     rlPushMatrix();
         rlTranslatef(centerPos.x, centerPos.y, centerPos.z);
@@ -669,7 +684,7 @@ Model LoadModel(const char *fileName)
         model.materials = (Material *)RL_CALLOC(model.materialCount, sizeof(Material));
         model.materials[0] = LoadMaterialDefault();
 
-        model.meshMaterial = (int *)RL_CALLOC(model.meshCount, sizeof(int));
+        if (model.meshMaterial == NULL) model.meshMaterial = (int *)RL_CALLOC(model.meshCount, sizeof(int));
     }
 
     return model;
@@ -725,9 +740,9 @@ Mesh *LoadMeshes(const char *fileName, int *meshCount)
 {
     Mesh *meshes = NULL;
     int count = 0;
-    
+
     // TODO: Load meshes from file (OBJ, IQM, GLTF)
-    
+
     *meshCount = count;
     return meshes;
 }
@@ -800,7 +815,7 @@ Material *LoadMaterials(const char *fileName, int *materialCount)
 {
     Material *materials = NULL;
     unsigned int count = 0;
-    
+
     // TODO: Support IQM and GLTF for materials parsing
 
 #if defined(SUPPORT_FILEFORMAT_MTL)
@@ -809,6 +824,9 @@ Material *LoadMaterials(const char *fileName, int *materialCount)
         tinyobj_material_t *mats;
 
         int result = tinyobj_parse_mtl_file(&mats, &count, fileName);
+        if (result != TINYOBJ_SUCCESS) {
+            TraceLog(LOG_WARNING, "[%s] Could not parse Materials file", fileName);
+        }
 
         // TODO: Process materials to return
 
@@ -853,7 +871,7 @@ void UnloadMaterial(Material material)
     {
         if (material.maps[i].texture.id != GetTextureDefault().id) rlDeleteTextures(material.maps[i].texture.id);
     }
-    
+
     RL_FREE(material.maps);
 }
 
@@ -908,7 +926,7 @@ ModelAnimation *LoadModelAnimations(const char *filename, int *animCount)
         float framerate;
         unsigned int flags;
     } IQMAnim;
-    
+
     FILE *iqmFile;
     IQMHeader iqm;
 
@@ -926,12 +944,16 @@ ModelAnimation *LoadModelAnimations(const char *filename, int *animCount)
     {
         TraceLog(LOG_ERROR, "Magic Number \"%s\"does not match.", iqm.magic);
         fclose(iqmFile);
+
+        return NULL;
     }
 
     if (iqm.version != IQM_VERSION)
     {
         TraceLog(LOG_ERROR, "IQM version %i is incorrect.", iqm.version);
         fclose(iqmFile);
+        
+        return NULL;
     }
 
     // Get bones data
@@ -1076,7 +1098,7 @@ ModelAnimation *LoadModelAnimations(const char *filename, int *animCount)
     RL_FREE(framedata);
     RL_FREE(poses);
     RL_FREE(anim);
-    
+
     fclose(iqmFile);
 
     return animations;
@@ -1151,7 +1173,7 @@ void UpdateModelAnimation(Model model, ModelAnimation anim, int frame)
 void UnloadModelAnimation(ModelAnimation anim)
 {
     for (int i = 0; i < anim.frameCount; i++) RL_FREE(anim.framePoses[i]);
-    
+
     RL_FREE(anim.bones);
     RL_FREE(anim.framePoses);
 }
@@ -1161,7 +1183,7 @@ void UnloadModelAnimation(ModelAnimation anim)
 bool IsModelAnimationValid(Model model, ModelAnimation anim)
 {
     int result = true;
-    
+
     if (model.boneCount != anim.boneCount) result = false;
     else
     {
@@ -2336,7 +2358,7 @@ void MeshTangents(Mesh *mesh)
 
     RL_FREE(tan1);
     RL_FREE(tan2);
-    
+
     // Load a new tangent attributes buffer
     mesh->vboId[LOC_VERTEX_TANGENT] = rlLoadAttribBuffer(mesh->vaoId, LOC_VERTEX_TANGENT, mesh->tangents, mesh->vertexCount*4*sizeof(float), false);
 
@@ -2382,8 +2404,18 @@ void DrawModelEx(Model model, Vector3 position, Vector3 rotationAxis, float rota
 
     for (int i = 0; i < model.meshCount; i++)
     {
-        model.materials[model.meshMaterial[i]].maps[MAP_DIFFUSE].color = tint;
+        // TODO: Review color + tint premultiplication mechanism
+        Color color = model.materials[model.meshMaterial[i]].maps[MAP_DIFFUSE].color;
+        
+        Color colorTint = WHITE;
+        colorTint.r = (((float)color.r/255.0)*((float)tint.r/255.0))*255;
+        colorTint.g = (((float)color.g/255.0)*((float)tint.g/255.0))*255;
+        colorTint.b = (((float)color.b/255.0)*((float)tint.b/255.0))*255;
+        colorTint.a = (((float)color.a/255.0)*((float)tint.a/255.0))*255;
+        
+        model.materials[model.meshMaterial[i]].maps[MAP_DIFFUSE].color = colorTint;
         rlDrawMesh(model.meshes[i], model.materials[model.meshMaterial[i]], model.transform);
+        model.materials[model.meshMaterial[i]].maps[MAP_DIFFUSE].color = color;
     }
 }
 
@@ -2491,7 +2523,7 @@ void DrawBoundingBox(BoundingBox box, Color color)
 bool CheckCollisionSpheres(Vector3 centerA, float radiusA, Vector3 centerB, float radiusB)
 {
     bool collision = false;
-    
+
     // Simple way to check for collision, just checking distance between two points
     // Unfortunately, sqrtf() is a costly operation, so we avoid it with following solution
     /*
@@ -2503,10 +2535,10 @@ bool CheckCollisionSpheres(Vector3 centerA, float radiusA, Vector3 centerB, floa
 
     if (distance <= (radiusA + radiusB)) collision = true;
     */
-    
+
     // Check for distances squared to avoid sqrtf()
     if (Vector3DotProduct(Vector3Subtract(centerB, centerA), Vector3Subtract(centerB, centerA)) <= (radiusA + radiusB)*(radiusA + radiusB)) collision = true;
-    
+
     return collision;
 }
 
@@ -2798,7 +2830,7 @@ static Model LoadOBJ(const char *fileName)
             model.materialCount = materialCount;
             model.materials = (Material *)RL_CALLOC(model.materialCount, sizeof(Material));
         }
-        
+
         model.meshMaterial = (int *)RL_CALLOC(model.meshCount, sizeof(int));
 
         /*
@@ -2860,6 +2892,9 @@ static Model LoadOBJ(const char *fileName)
 
             // Assign mesh material for current mesh
             model.meshMaterial[m] = attrib.material_ids[m];
+
+            // Set unfound materials to default
+            if (model.meshMaterial[m] == -1) model.meshMaterial[m] = 0;
         }
 
         // Init model materials
@@ -2881,7 +2916,7 @@ static Model LoadOBJ(const char *fileName)
                 float shininess;
                 float ior;          // index of refraction
                 float dissolve;     // 1 == opaque; 0 == fully transparent
-                // illumination model (see http://www.fileformat.info/format/material/)
+                // illumination model (Ref: http://www.fileformat.info/format/material/)
                 int illum;
 
                 int pad0;
@@ -2897,7 +2932,7 @@ static Model LoadOBJ(const char *fileName)
             */
 
             model.materials[m].maps[MAP_DIFFUSE].texture = GetTextureDefault();     // Get default texture, in case no texture is defined
-            
+
             if (materials[m].diffuse_texname != NULL) model.materials[m].maps[MAP_DIFFUSE].texture = LoadTexture(materials[m].diffuse_texname);  //char *diffuse_texname; // map_Kd
             model.materials[m].maps[MAP_DIFFUSE].color = (Color){ (float)(materials[m].diffuse[0]*255.0f), (float)(materials[m].diffuse[1]*255.0f), (float)(materials[m].diffuse[2]*255.0f), 255 }; //float diffuse[3];
             model.materials[m].maps[MAP_DIFFUSE].value = 0.0f;
@@ -2918,6 +2953,8 @@ static Model LoadOBJ(const char *fileName)
         tinyobj_attrib_free(&attrib);
         tinyobj_shapes_free(meshes, meshCount);
         tinyobj_materials_free(materials, materialCount);
+
+        RL_FREE(data);
     }
 
     // NOTE: At this point we have all model data loaded
@@ -2966,13 +3003,13 @@ static Model LoadIQM(const char *fileName)
     typedef struct IQMTriangle {
         unsigned int vertex[3];
     } IQMTriangle;
-    
+
     typedef struct IQMJoint {
         unsigned int name;
         int parent;
         float translate[3], rotate[4], scale[3];
     } IQMJoint;
-    
+
     typedef struct IQMVertexArray {
         unsigned int type;
         unsigned int flags;
@@ -3090,7 +3127,7 @@ static Model LoadIQM(const char *fileName)
         // NOTE: Animated vertex should be re-uploaded to GPU (if not using GPU skinning)
         model.meshes[i].animVertices = RL_CALLOC(model.meshes[i].vertexCount*3, sizeof(float));
         model.meshes[i].animNormals = RL_CALLOC(model.meshes[i].vertexCount*3, sizeof(float));
-        
+
         model.meshes[i].vboId = (unsigned int *)RL_CALLOC(MAX_MESH_VBO, sizeof(unsigned int));
     }
 
@@ -3286,7 +3323,7 @@ static const unsigned char base64Table[] = {
 static int GetSizeBase64(char *input)
 {
     int size = 0;
-    
+
     for (int i = 0; input[4*i] != 0; i++)
     {
         if (input[4*i + 3] == '=')
@@ -3296,7 +3333,7 @@ static int GetSizeBase64(char *input)
         }
         else size += 3;
     }
-    
+
     return size;
 }
 
@@ -3336,28 +3373,110 @@ static unsigned char *DecodeBase64(char *input, int *size)
     return buf;
 }
 
+// Load texture from cgltf_image
+static Texture LoadTextureFromCgltfImage(cgltf_image *image, const char *texPath, Color tint)
+{
+    Texture texture = { 0 };
+
+    if (image->uri)
+    {
+        if ((strlen(image->uri) > 5) &&
+            (image->uri[0] == 'd') &&
+            (image->uri[1] == 'a') &&
+            (image->uri[2] == 't') &&
+            (image->uri[3] == 'a') &&
+            (image->uri[4] == ':'))
+        {
+            // Data URI
+            // Format: data:<mediatype>;base64,<data>
+
+            // Find the comma
+            int i = 0;
+            while ((image->uri[i] != ',') && (image->uri[i] != 0)) i++;
+
+            if (image->uri[i] == 0) TraceLog(LOG_WARNING, "CGLTF Image: Invalid data URI");
+            else
+            {
+                int size;
+                unsigned char *data = DecodeBase64(image->uri + i + 1, &size);
+
+                int w, h;
+                unsigned char *raw = stbi_load_from_memory(data, size, &w, &h, NULL, 4);
+
+                Image rimage = LoadImagePro(raw, w, h, UNCOMPRESSED_R8G8B8A8);
+                
+                // TODO: Tint shouldn't be applied here!
+                ImageColorTint(&rimage, tint);
+                texture = LoadTextureFromImage(rimage);
+                UnloadImage(rimage);
+            }
+        }
+        else
+        {
+            Image rimage = LoadImage(TextFormat("%s/%s", texPath, image->uri));
+            
+            // TODO: Tint shouldn't be applied here!
+            ImageColorTint(&rimage, tint);
+            texture = LoadTextureFromImage(rimage);
+            UnloadImage(rimage);
+        }
+    }
+    else if (image->buffer_view)
+    {
+        unsigned char *data = RL_MALLOC(image->buffer_view->size);
+        int n = image->buffer_view->offset;
+        int stride = image->buffer_view->stride ? image->buffer_view->stride : 1;
+
+        for (int i = 0; i < image->buffer_view->size; i++)
+        {
+            data[i] = ((unsigned char *)image->buffer_view->buffer->data)[n];
+            n += stride;
+        }
+
+        int w, h;
+        unsigned char *raw = stbi_load_from_memory(data, image->buffer_view->size, &w, &h, NULL, 4);
+        free(data);
+
+        Image rimage = LoadImagePro(raw, w, h, UNCOMPRESSED_R8G8B8A8);
+        free(raw);
+
+        // TODO: Tint shouldn't be applied here!
+        ImageColorTint(&rimage, tint);
+        texture = LoadTextureFromImage(rimage);
+        UnloadImage(rimage);
+    }
+    else
+    {
+        Image rimage = LoadImageEx(&tint, 1, 1);
+        texture = LoadTextureFromImage(rimage);
+        UnloadImage(rimage);
+    }
+
+    return texture;
+}
+
 // Load glTF mesh data
 static Model LoadGLTF(const char *fileName)
 {
     /***********************************************************************************
-    
+
         Function implemented by Wilhem Barbier (@wbrbr)
-    
+
         Features:
           - Supports .gltf and .glb files
           - Supports embedded (base64) or external textures
           - Loads the albedo/diffuse texture (other maps could be added)
           - Supports multiple mesh per model and multiple primitives per model
-          
+
         Some restrictions (not exhaustive):
           - Triangle-only meshes
           - Not supported node hierarchies or transforms
           - Only loads the diffuse texture... but not too hard to support other maps (normal, roughness/metalness...)
           - Only supports unsigned short indices (no byte/unsigned int)
           - Only supports float for texture coordinates (no byte/unsigned short)
-          
+
     *************************************************************************************/
-    
+
     #define LOAD_ACCESSOR(type, nbcomp, acc, dst) \
     { \
         int n = 0; \
@@ -3369,7 +3488,7 @@ static Model LoadGLTF(const char *fileName)
             n += acc->stride/sizeof(type);\
         }\
     }
-    
+
     Model model = { 0 };
 
     // glTF file loading
@@ -3401,9 +3520,10 @@ static Model LoadGLTF(const char *fileName)
 
         // Read data buffers
         result = cgltf_load_buffers(&options, data, fileName);
+        if (result != cgltf_result_success) TraceLog(LOG_INFO, "[%s][%s] Error loading mesh/material buffers", fileName, (data->file_type == 2)? "glb" : "gltf");
 
         int primitivesCount = 0;
-        
+
         for (int i = 0; i < data->meshes_count; i++) primitivesCount += (int)data->meshes[i].primitives_count;
 
         // Process glTF data and map to model
@@ -3412,116 +3532,65 @@ static Model LoadGLTF(const char *fileName)
         model.materialCount = data->materials_count + 1;
         model.materials = RL_MALLOC(model.materialCount*sizeof(Material));
         model.meshMaterial = RL_MALLOC(model.meshCount*sizeof(int));
-        
+
         for (int i = 0; i < model.meshCount; i++) model.meshes[i].vboId = (unsigned int *)RL_CALLOC(MAX_MESH_VBO, sizeof(unsigned int));
 
+        //For each material
         for (int i = 0; i < model.materialCount - 1; i++)
         {
-            Color tint = WHITE;
-            Texture2D texture = { 0 };
+            model.materials[i] = LoadMaterialDefault();
+            Color tint = (Color){ 255, 255, 255, 255 };
             const char *texPath = GetDirectoryPath(fileName);
-            
-            if (data->materials[i].has_pbr_metallic_roughness)
+
+            //Ensure material follows raylib support for PBR (metallic/roughness flow)
+            if (data->materials[i].has_pbr_metallic_roughness) 
             {
-                tint.r = (unsigned char)(data->materials[i].pbr_metallic_roughness.base_color_factor[0]*255.99f);
-                tint.g = (unsigned char)(data->materials[i].pbr_metallic_roughness.base_color_factor[1]*255.99f);
-                tint.b = (unsigned char)(data->materials[i].pbr_metallic_roughness.base_color_factor[2]*255.99f);
-                tint.a = (unsigned char)(data->materials[i].pbr_metallic_roughness.base_color_factor[3]*255.99f);
-            }
-            else
-            {
-                tint.r = 1.0f;
-                tint.g = 1.0f;
-                tint.b = 1.0f;
-                tint.a = 1.0f;
-            }
-            
-            if (data->materials[i].has_pbr_metallic_roughness)
-            {
-                cgltf_image *img = data->materials[i].pbr_metallic_roughness.base_color_texture.texture->image;
-                
-                if (img->uri) 
+                float roughness = data->materials[i].pbr_metallic_roughness.roughness_factor;
+                float metallic = data->materials[i].pbr_metallic_roughness.metallic_factor;
+
+                // NOTE: Material name not used for the moment
+                //if (model.materials[i].name && data->materials[i].name) strcpy(model.materials[i].name, data->materials[i].name);
+
+                // TODO: REview: shouldn't these be *255 ???
+                tint.r = (unsigned char)(data->materials[i].pbr_metallic_roughness.base_color_factor[0]*255);
+                tint.g = (unsigned char)(data->materials[i].pbr_metallic_roughness.base_color_factor[1]*255);
+                tint.b = (unsigned char)(data->materials[i].pbr_metallic_roughness.base_color_factor[2]*255);
+                tint.a = (unsigned char)(data->materials[i].pbr_metallic_roughness.base_color_factor[3]*255);
+
+                model.materials[i].maps[MAP_ROUGHNESS].color = tint;
+
+                if (data->materials[i].pbr_metallic_roughness.base_color_texture.texture) 
                 {
-                    if ((strlen(img->uri) > 5) &&
-                        (img->uri[0] == 'd') &&
-                        (img->uri[1] == 'a') &&
-                        (img->uri[2] == 't') &&
-                        (img->uri[3] == 'a') &&
-                        (img->uri[4] == ':'))
-                    {
-                        // Data URI
-                        // Format: data:<mediatype>;base64,<data>
-
-                        // Find the comma
-                        int i = 0;
-                        while ((img->uri[i] != ',') && (img->uri[i] != 0)) i++;
-
-                        if (img->uri[i] == 0) TraceLog(LOG_WARNING, "[%s] Invalid data URI", fileName);
-                        else
-                        {
-                            int size;
-                            unsigned char *data = DecodeBase64(img->uri + i + 1, &size);
-                            
-                            int w, h;
-                            unsigned char *raw = stbi_load_from_memory(data, size, &w, &h, NULL, 4);
-                            
-                            Image image = LoadImagePro(raw, w, h, UNCOMPRESSED_R8G8B8A8);
-                            ImageColorTint(&image, tint);
-                            texture = LoadTextureFromImage(image);
-                            UnloadImage(image);
-                        }
-                    }
-                    else
-                    {
-                        char *textureName = img->uri;
-                        char *texturePath = RL_MALLOC(strlen(texPath) + strlen(textureName) + 2);
-                        strcpy(texturePath, texPath);
-                        strcat(texturePath, "/");
-                        strcat(texturePath, textureName);
-
-                        Image image = LoadImage(texturePath);
-                        ImageColorTint(&image, tint);
-                        texture = LoadTextureFromImage(image);
-                        UnloadImage(image);
-                        RL_FREE(texturePath);
-                    }
+                    model.materials[i].maps[MAP_ALBEDO].texture = LoadTextureFromCgltfImage(data->materials[i].pbr_metallic_roughness.base_color_texture.texture->image, texPath, tint);
                 }
-                else if (img->buffer_view)
-                {
-                    unsigned char *data = RL_MALLOC(img->buffer_view->size);
-                    int n = img->buffer_view->offset;
-                    int stride = img->buffer_view->stride ? img->buffer_view->stride : 1;
-                    
-                    for (int i = 0; i < img->buffer_view->size; i++)
-                    {
-                        data[i] = ((unsigned char *)img->buffer_view->buffer->data)[n];
-                        n += stride;
-                    }
 
-                    int w, h;
-                    unsigned char *raw = stbi_load_from_memory(data, img->buffer_view->size, &w, &h, NULL, 4);
-                    
-                    Image image = LoadImagePro(raw, w, h, UNCOMPRESSED_R8G8B8A8);
-                    ImageColorTint(&image, tint);
-                    texture = LoadTextureFromImage(image);
-                    UnloadImage(image);
-                }
-                else
+                // NOTE: Tint isn't need for other textures.. pass null or clear? 
+                // Just set as white, multiplying by white has no effect
+                tint = WHITE;
+
+                if (data->materials[i].pbr_metallic_roughness.metallic_roughness_texture.texture)
                 {
-                    Image image = LoadImageEx(&tint, 1, 1);
-                    texture = LoadTextureFromImage(image);
-                    UnloadImage(image);
+                    model.materials[i].maps[MAP_ROUGHNESS].texture = LoadTextureFromCgltfImage(data->materials[i].pbr_metallic_roughness.metallic_roughness_texture.texture->image, texPath, tint);
+                }
+                model.materials[i].maps[MAP_ROUGHNESS].value = roughness;
+                model.materials[i].maps[MAP_METALNESS].value = metallic;
+
+                if (data->materials[i].normal_texture.texture) 
+                {
+                    model.materials[i].maps[MAP_NORMAL].texture = LoadTextureFromCgltfImage(data->materials[i].normal_texture.texture->image, texPath, tint);
                 }
                 
-                model.materials[i] = LoadMaterialDefault();
-                model.materials[i].maps[MAP_DIFFUSE].texture = texture;
+                if (data->materials[i].occlusion_texture.texture) 
+                {
+                    model.materials[i].maps[MAP_OCCLUSION].texture = LoadTextureFromCgltfImage(data->materials[i].occlusion_texture.texture->image, texPath, tint);
+                }
             }
         }
-        
+
         model.materials[model.materialCount - 1] = LoadMaterialDefault();
 
         int primitiveIndex = 0;
-        
+
         for (int i = 0; i < data->meshes_count; i++)
         {
             for (int p = 0; p < data->meshes[i].primitives_count; p++)
@@ -3546,7 +3615,7 @@ static Model LoadGLTF(const char *fileName)
                     else if (data->meshes[i].primitives[p].attributes[j].type == cgltf_attribute_type_texcoord)
                     {
                         cgltf_accessor *acc = data->meshes[i].primitives[p].attributes[j].data;
-                        
+
                         if (acc->component_type == cgltf_component_type_r_32f)
                         {
                             model.meshes[primitiveIndex].texcoords = RL_MALLOC(sizeof(float)*acc->count*2);
@@ -3554,14 +3623,14 @@ static Model LoadGLTF(const char *fileName)
                         }
                         else
                         {
-                            // TODO: support normalized unsigned byte/unsigned short texture coordinates
+                            // TODO: Support normalized unsigned byte/unsigned short texture coordinates
                             TraceLog(LOG_WARNING, "[%s] Texture coordinates must be float", fileName);
                         }
                     }
                 }
 
                 cgltf_accessor *acc = data->meshes[i].primitives[p].indices;
-                
+
                 if (acc)
                 {
                     if (acc->component_type == cgltf_component_type_r_16u)
@@ -3572,7 +3641,7 @@ static Model LoadGLTF(const char *fileName)
                     }
                     else
                     {
-                        // TODO: support unsigned byte/unsigned int
+                        // TODO: Support unsigned byte/unsigned int
                         TraceLog(LOG_WARNING, "[%s] Indices must be unsigned short", fileName);
                     }
                 }
@@ -3591,7 +3660,7 @@ static Model LoadGLTF(const char *fileName)
                 {
                     model.meshMaterial[primitiveIndex] = model.materialCount - 1;;
                 }
-                
+
                 primitiveIndex++;
             }
         }
