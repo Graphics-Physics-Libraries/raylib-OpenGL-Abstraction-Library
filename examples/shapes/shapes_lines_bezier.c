@@ -2,15 +2,20 @@
 *
 *   raylib [shapes] example - Cubic-bezier lines
 *
-*   This example has been created using raylib 1.7 (www.raylib.com)
-*   raylib is licensed under an unmodified zlib/libpng license (View raylib.h for details)
+*   Example originally created with raylib 1.7, last time updated with raylib 1.7
 *
-*   Copyright (c) 2017 Ramon Santamaria (@raysan5)
+*   Example licensed under an unmodified zlib/libpng license, which is an OSI-certified,
+*   BSD-like license that allows static linking with closed source software
+*
+*   Copyright (c) 2017-2023 Ramon Santamaria (@raysan5)
 *
 ********************************************************************************************/
 
 #include "raylib.h"
 
+//------------------------------------------------------------------------------------
+// Program main entry point
+//------------------------------------------------------------------------------------
 int main(void)
 {
     // Initialization
@@ -22,7 +27,7 @@ int main(void)
     InitWindow(screenWidth, screenHeight, "raylib [shapes] example - cubic-bezier lines");
 
     Vector2 start = { 0, 0 };
-    Vector2 end = { screenWidth, screenHeight };
+    Vector2 end = { (float)screenWidth, (float)screenHeight };
 
     SetTargetFPS(60);               // Set our game to run at 60 frames-per-second
     //--------------------------------------------------------------------------------------
@@ -32,8 +37,8 @@ int main(void)
     {
         // Update
         //----------------------------------------------------------------------------------
-        if (IsMouseButtonDown(MOUSE_LEFT_BUTTON)) start = GetMousePosition();
-        else if (IsMouseButtonDown(MOUSE_RIGHT_BUTTON)) end = GetMousePosition();
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) start = GetMousePosition();
+        else if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) end = GetMousePosition();
         //----------------------------------------------------------------------------------
 
         // Draw

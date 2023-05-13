@@ -2,12 +2,14 @@
 *
 *   raylib [shapes] example - draw rectangle rounded (with gui options)
 *
-*   This example has been created using raylib 2.5 (www.raylib.com)
-*   raylib is licensed under an unmodified zlib/libpng license (View raylib.h for details)
+*   Example originally created with raylib 2.5, last time updated with raylib 2.5
 *
 *   Example contributed by Vlad Adrian (@demizdor) and reviewed by Ramon Santamaria (@raysan5)
 *
-*   Copyright (c) 2018 Vlad Adrian (@demizdor) and Ramon Santamaria (@raysan5)
+*   Example licensed under an unmodified zlib/libpng license, which is an OSI-certified,
+*   BSD-like license that allows static linking with closed source software
+*
+*   Copyright (c) 2018-2023 Vlad Adrian (@demizdor) and Ramon Santamaria (@raysan5)
 *
 ********************************************************************************************/
 
@@ -16,6 +18,9 @@
 #define RAYGUI_IMPLEMENTATION
 #include "raygui.h"                 // Required for GUI controls
 
+//------------------------------------------------------------------------------------
+// Program main entry point
+//------------------------------------------------------------------------------------
 int main(void)
 {
     // Initialization
@@ -43,7 +48,7 @@ int main(void)
     {
         // Update
         //----------------------------------------------------------------------------------
-        Rectangle rec = { (GetScreenWidth() - width - 250)/2, (GetScreenHeight() - height)/2, width, height };
+        Rectangle rec = { ((float)GetScreenWidth() - width - 250)/2, (GetScreenHeight() - height)/2.0f, (float)width, (float)height };
         //----------------------------------------------------------------------------------
 
         // Draw
@@ -55,24 +60,24 @@ int main(void)
             DrawLine(560, 0, 560, GetScreenHeight(), Fade(LIGHTGRAY, 0.6f));
             DrawRectangle(560, 0, GetScreenWidth() - 500, GetScreenHeight(), Fade(LIGHTGRAY, 0.3f));
 
-            if (drawRect) DrawRectangleRec(rec, Fade(GOLD, 0.6));
-            if (drawRoundedRect) DrawRectangleRounded(rec, roundness, segments, Fade(MAROON, 0.2));
-            if (drawRoundedLines) DrawRectangleRoundedLines(rec,roundness, segments, lineThick, Fade(MAROON, 0.4));
+            if (drawRect) DrawRectangleRec(rec, Fade(GOLD, 0.6f));
+            if (drawRoundedRect) DrawRectangleRounded(rec, roundness, segments, Fade(MAROON, 0.2f));
+            if (drawRoundedLines) DrawRectangleRoundedLines(rec,roundness, segments, (float)lineThick, Fade(MAROON, 0.4f));
 
             // Draw GUI controls
             //------------------------------------------------------------------------------
-            width = GuiSliderBar((Rectangle){ 640, 40, 105, 20 }, "Width", width, 0, GetScreenWidth() - 300, true );
-            height = GuiSliderBar((Rectangle){ 640, 70, 105, 20 }, "Height", height, 0, GetScreenHeight() - 50, true);
-            roundness = GuiSliderBar((Rectangle){ 640, 140, 105, 20 }, "Roundness", roundness, 0.0f, 1.0f, true);
-            lineThick = GuiSliderBar((Rectangle){ 640, 170, 105, 20 }, "Thickness", lineThick, 0, 20, true);
-            segments = GuiSliderBar((Rectangle){ 640, 240, 105, 20}, "Segments", segments, 0, 60, true);
+            width = (int)GuiSliderBar((Rectangle){ 640, 40, 105, 20 }, "Width", NULL, (float)width, 0, (float)GetScreenWidth() - 300);
+            height = (int)GuiSliderBar((Rectangle){ 640, 70, 105, 20 }, "Height", NULL, (float)height, 0, (float)GetScreenHeight() - 50);
+            roundness = GuiSliderBar((Rectangle){ 640, 140, 105, 20 }, "Roundness", NULL, roundness, 0.0f, 1.0f);
+            lineThick = (int)GuiSliderBar((Rectangle){ 640, 170, 105, 20 }, "Thickness", NULL, (float)lineThick, 0, 20);
+            segments = (int)GuiSliderBar((Rectangle){ 640, 240, 105, 20}, "Segments", NULL, (float)segments, 0, 60);
 
             drawRoundedRect = GuiCheckBox((Rectangle){ 640, 320, 20, 20 }, "DrawRoundedRect", drawRoundedRect);
             drawRoundedLines = GuiCheckBox((Rectangle){ 640, 350, 20, 20 }, "DrawRoundedLines", drawRoundedLines);
             drawRect = GuiCheckBox((Rectangle){ 640, 380, 20, 20}, "DrawRect", drawRect);
             //------------------------------------------------------------------------------
 
-            DrawText(FormatText("MODE: %s", (segments >= 4)? "MANUAL" : "AUTO"), 640, 280, 10, (segments >= 4)? MAROON : DARKGRAY);
+            DrawText(TextFormat("MODE: %s", (segments >= 4)? "MANUAL" : "AUTO"), 640, 280, 10, (segments >= 4)? MAROON : DARKGRAY);
 
             DrawFPS(10, 10);
 

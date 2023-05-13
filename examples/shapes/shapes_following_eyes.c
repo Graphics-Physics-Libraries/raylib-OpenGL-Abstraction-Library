@@ -2,10 +2,12 @@
 *
 *   raylib [shapes] example - following eyes
 *
-*   This example has been created using raylib 2.5 (www.raylib.com)
-*   raylib is licensed under an unmodified zlib/libpng license (View raylib.h for details)
+*   Example originally created with raylib 2.5, last time updated with raylib 2.5
 *
-*   Copyright (c) 2013-2019 Ramon Santamaria (@raysan5)
+*   Example licensed under an unmodified zlib/libpng license, which is an OSI-certified,
+*   BSD-like license that allows static linking with closed source software
+*
+*   Copyright (c) 2013-2023 Ramon Santamaria (@raysan5)
 *
 ********************************************************************************************/
 
@@ -13,6 +15,9 @@
 
 #include <math.h>       // Required for: atan2f()
 
+//------------------------------------------------------------------------------------
+// Program main entry point
+//------------------------------------------------------------------------------------
 int main(void)
 {
     // Initialization
@@ -22,12 +27,12 @@ int main(void)
 
     InitWindow(screenWidth, screenHeight, "raylib [shapes] example - following eyes");
 
-    Vector2 scleraLeftPosition = { GetScreenWidth()/2 - 100, GetScreenHeight()/2 };
-    Vector2 scleraRightPosition = { GetScreenWidth()/2 + 100, GetScreenHeight()/2 };
+    Vector2 scleraLeftPosition = { GetScreenWidth()/2.0f - 100.0f, GetScreenHeight()/2.0f };
+    Vector2 scleraRightPosition = { GetScreenWidth()/2.0f + 100.0f, GetScreenHeight()/2.0f };
     float scleraRadius = 80;
 
-    Vector2 irisLeftPosition = { GetScreenWidth()/2 - 100, GetScreenHeight()/2 };
-    Vector2 irisRightPosition = { GetScreenWidth()/2 + 100, GetScreenHeight()/2};
+    Vector2 irisLeftPosition = { GetScreenWidth()/2.0f - 100.0f, GetScreenHeight()/2.0f };
+    Vector2 irisRightPosition = { GetScreenWidth()/2.0f + 100.0f, GetScreenHeight()/2.0f };
     float irisRadius = 24;
 
     float angle = 0.0f;
